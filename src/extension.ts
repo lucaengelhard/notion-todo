@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import "dotenv/config";
 import { Client } from "@notionhq/client";
 import { ToDo } from "./types";
+import path from "path";
 
 var toDoStore: ToDo[] = [];
 const notion = new Client({
@@ -12,6 +13,10 @@ const notion = new Client({
 const dbKey: string | undefined = vscode.workspace
   .getConfiguration("vscodeNotion.notion")
   .get("dbKey");
+
+const rootFolder = vscode.workspace.workspaceFolders
+  ? vscode.workspace.workspaceFolders[0]
+  : undefined;
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -60,9 +65,15 @@ async function getToDos(fileUri: vscode.Uri) {
 
     const fileName = fileUri.path.split("/").pop();
 
+    let filePath = fileUri.path;
+
+    if (rootFolder) {
+      filePath = path.relative(rootFolder.uri.path, fileUri.path);
+    }
+
     toDoStore.push({
       filename: fileName,
-      path: fileUri.path,
+      path: filePath,
       toDo: sanitizedToDO,
       position: { start: startPos, end: endPos },
       lastChanged: lastChanged,
@@ -215,6 +226,9 @@ async function createNotionTodo(toDo: ToDo) {
         select: {
           name: "Not Started",
         },
+      },
+      Tags: {
+        multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
       },
     },
   });

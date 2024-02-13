@@ -22,6 +22,9 @@
         },
         "vscodeNotion.notion.dbKey": {
           "type": "string"
+        },
+        "vscodeNotion.notion.additionalProps": {
+          "type": "string"
         }
       }
     }
