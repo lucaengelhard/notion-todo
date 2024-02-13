@@ -3,7 +3,7 @@
 import * as vscode from "vscode";
 import "dotenv/config";
 import { Client } from "@notionhq/client";
-import { ToDo } from "./types";
+import { ToDo, customProp } from "./types";
 import path from "path";
 
 var toDoStore: ToDo[] = [];
@@ -18,10 +18,29 @@ const rootFolder = vscode.workspace.workspaceFolders
   ? vscode.workspace.workspaceFolders[0]
   : undefined;
 
+const customMultiSelect: customProp = {
+  name: vscode.workspace
+    .getConfiguration("vscodeNotion.notion.additionalProps")
+    .get("Custom Multi-Select Name"),
+  property: vscode.workspace
+    .getConfiguration("vscodeNotion.notion.additionalProps")
+    .get("Custom Multi-Select Property"),
+};
+
+const customSelect: customProp = {
+  name: vscode.workspace
+    .getConfiguration("vscodeNotion.notion.additionalProps")
+    .get("Custom Select Name"),
+  property: vscode.workspace
+    .getConfiguration("vscodeNotion.notion.additionalProps")
+    .get("Custom Select Property"),
+};
+
 // This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
+  console.log(customMultiSelect);
+  console.log(customSelect);
 
   const workspaceFiles = await vscode.workspace.findFiles(
     "**/*.{ts,js}",
@@ -169,6 +188,31 @@ async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
           },
         ],
       },
+      Tags: {
+        multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
+      },
+      ...(customSelect.name
+        ? {
+            [customSelect.name]: {
+              select: {
+                name: customSelect.property ? customSelect.property : "",
+              },
+            },
+          }
+        : {}),
+      ...(customMultiSelect.name
+        ? {
+            [customMultiSelect.name]: {
+              multi_select: [
+                {
+                  name: customMultiSelect.property
+                    ? customMultiSelect.property
+                    : "",
+                },
+              ],
+            },
+          }
+        : {}),
     },
   });
 
@@ -230,6 +274,28 @@ async function createNotionTodo(toDo: ToDo) {
       Tags: {
         multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
       },
+      ...(customSelect.name
+        ? {
+            [customSelect.name]: {
+              select: {
+                name: customSelect.property ? customSelect.property : "",
+              },
+            },
+          }
+        : {}),
+      ...(customMultiSelect.name
+        ? {
+            [customMultiSelect.name]: {
+              multi_select: [
+                {
+                  name: customMultiSelect.property
+                    ? customMultiSelect.property
+                    : "",
+                },
+              ],
+            },
+          }
+        : {}),
     },
   });
 

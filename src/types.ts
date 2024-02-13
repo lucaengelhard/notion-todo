@@ -9,3 +9,8 @@ export interface ToDo {
   lastChanged: Date;
   notionId?: string;
 }
+
+export interface customProp {
+  name?: string;
+  property?: string;
+}

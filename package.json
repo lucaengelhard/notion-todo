@@ -24,7 +24,21 @@
           "type": "string"
         },
         "vscodeNotion.notion.additionalProps": {
-          "type": "string"
+          "type": "object",
+          "properties": {
+            "Custom Multi-Select Name": {
+              "type": "string"
+            },
+            "Custom Multi-Select Property": {
+              "type": "string"
+            },
+            "Custom Select Name": {
+              "type": "string"
+            },
+            "Custom Select Property": {
+              "type": "string"
+            }
+          }
         }
       }
     }
