@@ -7,8 +7,6 @@ import * as vscode from "vscode";
 export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
 
-  const currentDocLang = vscode.window.activeTextEditor?.document.languageId;
-
   const workspaceFiles = await vscode.workspace.findFiles(
     "**/*.{ts,js}",
     "**/{node_modules,dist}/**"
@@ -29,7 +27,6 @@ async function getToDos(fileUri: vscode.Uri) {
   const file = await vscode.workspace.openTextDocument(fileUri);
 
   const regex = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
-
   const toDos = file.getText().match(regex);
 
   if (!toDos) {
@@ -37,6 +34,11 @@ async function getToDos(fileUri: vscode.Uri) {
   }
 
   toDos.forEach((toDo) => {
-    console.log(toDo);
+    console.log(
+      toDo
+        .replace(/\/\/\s*TODO:|\/\*\s*TODO:/gm, "")
+        .replace("*/", "")
+        .trim()
+    );
   });
 }
