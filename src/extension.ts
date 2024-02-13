@@ -39,8 +39,6 @@ const customSelect: customProp = {
 // This method is called when your extension is activated
 export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
-  console.log(customMultiSelect);
-  console.log(customSelect);
 
   const workspaceFiles = await vscode.workspace.findFiles(
     "**/*.{ts,js}",
@@ -52,11 +50,16 @@ export async function activate(context: vscode.ExtensionContext) {
     await getToDos(file);
   }
 
-  const notionToDos = await getNotionToDos();
+  const initialNotionToDos = await getNotionToDos();
 
-  mergeToDos(notionToDos);
+  mergeToDos(initialNotionToDos);
 
-  context.subscriptions.push();
+  vscode.workspace.onDidSaveTextDocument(async (event) => {
+    console.log(event);
+    const fileToDos = await getToDos(event.uri);
+    const notionToDos = await getNotionToDos();
+    mergeToDos(notionToDos);
+  });
 }
 
 // This method is called when your extension is deactivated
@@ -135,7 +138,7 @@ async function getNotionToDos(): Promise<ToDo[]> {
 }
 
 async function mergeToDos(notionToDos: ToDo[]) {
-  for (let i = 0; i < 5 /*toDoStore.length*/; i++) {
+  for (let i = 0; i < toDoStore.length; i++) {
     const toDo = toDoStore[i];
     let intersecting = false;
 
@@ -187,6 +190,9 @@ async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
             },
           },
         ],
+      },
+      "VS Code Todo": {
+        checkbox: true,
       },
       Tags: {
         multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
@@ -270,6 +276,9 @@ async function createNotionTodo(toDo: ToDo) {
         select: {
           name: "Not Started",
         },
+      },
+      "VS Code Todo": {
+        checkbox: true,
       },
       Tags: {
         multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
