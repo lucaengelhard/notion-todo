@@ -13,7 +13,7 @@ import {
   rootFolder,
 } from "./config";
 
-var toDoStore: ToDo[] = [];
+var toDoStore: Map<string, ToDo> = new Map();
 
 var lastUpdated: number | undefined = undefined;
 
@@ -110,7 +110,7 @@ async function getToDos(fileUri: vscode.Uri) {
       };
       const res: any = await createNotionTodo(notionToDo);
 
-      notionId = res.id;
+      notionId = res.id.replaceAll("-", "");
       notionUrl = res.url;
     } else {
       notionUrl = notionUrlMatches[1];
@@ -120,24 +120,23 @@ async function getToDos(fileUri: vscode.Uri) {
       if (!notionIdMatches) {
         notionId = "no id defined";
       } else {
-        notionId = notionIdMatches[0].replace("'", "");
+        notionId = notionIdMatches[0].replace("'", "").replaceAll("-", "");
       }
     }
 
-    toDoStore.push({
+    toDoStore.set(notionId.replaceAll("-", ""), {
       filename: fileName,
       path: filePath,
       toDo: sanitizedToDO,
       position: { start: startPos, end: endPos },
       lastChanged: lastChanged,
-      notionId: notionId,
       notionUrl: notionUrl,
     });
   }
 }
 
-async function getNotionToDos(): Promise<ToDo[]> {
-  let notionToDos: ToDo[] = [];
+async function getNotionToDos(): Promise<Map<string, ToDo>> {
+  let notionToDos: Map<string, ToDo> = new Map();
 
   if (!dbKey) {
     throw new Error("no Notion Database Id given");
@@ -171,65 +170,43 @@ async function getNotionToDos(): Promise<ToDo[]> {
       status: element.properties.Status.select.name,
       position: JSON.parse(element.properties.Position.rich_text[0].plain_text),
       lastChanged: new Date(element.last_edited_time),
-      notionId: element.id,
       notionUrl: element.url,
     };
 
-    notionToDos.push(toDo);
+    notionToDos.set(element.id.replaceAll("-", ""), toDo);
   });
 
   return notionToDos;
 }
 
-async function mergeToDos(notionToDos: ToDo[]) {
-  for (let i = 0; i < toDoStore.length; i++) {
-    const toDo = toDoStore[i];
-    let intersecting = false;
+async function mergeToDos(notionToDos: Map<string, ToDo>) {
+  toDoStore.forEach((toDo, localId) => {
+    const id = localId.replaceAll("-", "");
 
-    for (let u = 0; u < notionToDos.length; u++) {
-      const notionToDo = notionToDos[u];
+    const notionToDo = notionToDos.get(id);
 
-      //console.log({ local: toDo.notionId?.replaceAll("-", "") });
-      //console.log({ notion: notionToDo.notionId?.replaceAll("-", "") });
-
-      if (
-        toDo.notionId?.replaceAll("-", "") ===
-        notionToDo.notionId?.replaceAll("-", "")
-      ) {
-        console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
-        intersecting = true;
-
-        if (toDo.lastChanged > notionToDo.lastChanged) {
-          console.log(`VS Code Todo "${toDo.toDo}" is newer`);
-
-          upDateNotionToDo(toDo, notionToDo);
-          toDoStore[i] = toDo;
-        }
-        if (toDo.lastChanged < notionToDo.lastChanged) {
-          console.log(`Notion Todo "${toDo.toDo}" is newer`);
-
-          toDoStore[i] = notionToDo;
-        }
+    if (notionToDo) {
+      if (notionToDo.lastChanged > toDo.lastChanged) {
+        console.log(`Notion Todo "${toDo.toDo}" is newer`);
+        toDoStore.set(id, notionToDo);
       }
-    }
 
-    if (!intersecting) {
+      if (notionToDo.lastChanged <= toDo.lastChanged) {
+        console.log(`VS Code Todo "${toDo.toDo}" is newer`);
+        upDateNotionToDo(toDo, id);
+      }
+    } else {
       console.log(`${toDo.toDo} (${toDo.path}) is not intersecting`);
-      createNotionTodo(toDo);
+      //createNotionTodo(toDo);
     }
-  }
+  });
   await modifyComments();
   vscode.window.showInformationMessage("Updating Notion ToDos done");
-  //console.log(toDoStore);
 }
 
-async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
-  if (!notionToDo.notionId) {
-    return;
-  }
-
+async function upDateNotionToDo(toDo: ToDo, id: string) {
   const response = await notion.pages.update({
-    page_id: notionToDo.notionId,
+    page_id: id,
     properties: {
       Name: {
         title: [
@@ -364,13 +341,15 @@ async function createNotionTodo(toDo: ToDo) {
 
 async function modifyComments() {
   const commentstart = "//";
+  const iterator = toDoStore.entries();
 
-  for (let i = 0; i < toDoStore.length; i++) {
+  for (let i = 0; i < toDoStore.size; i++) {
     if (!vscode.workspace.workspaceFolders) {
       throw new Error("No Workspace Folders Open");
     }
 
-    const toDo = toDoStore[i];
+    const toDo: ToDo = iterator.next().value[1];
+
     const replacementString =
       commentstart + `TODO: ${toDo.toDo} (${toDo.notionUrl})`;
 
