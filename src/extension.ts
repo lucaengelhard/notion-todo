@@ -57,7 +57,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   const interval = setInterval(async () => {
-    console.log("Regular Update");
+    vscode.window.showInformationMessage("Updating Notion ToDos (Interval)");
 
     const workspaceFiles = await getWorkSpaceFiles();
     for (let i = 0; i < workspaceFiles.length; i++) {
@@ -77,6 +77,9 @@ async function getWorkSpaceFiles() {
 }
 
 async function updateTodos(uri: vscode.Uri) {
+  vscode.window.showInformationMessage(
+    `Updating Notion ToDos\n(${uri.path.split("/").pop()})`
+  );
   const fileToDos = await getToDos(uri);
   const notionToDos = await getNotionToDos();
   mergeToDos(notionToDos);
@@ -192,6 +195,7 @@ async function mergeToDos(notionToDos: ToDo[]) {
       createNotionTodo(toDo);
     }
   }
+  vscode.window.showInformationMessage("Updating Notion ToDos done");
 }
 
 async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
