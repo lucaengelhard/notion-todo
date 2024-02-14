@@ -7,7 +7,6 @@ export interface ToDo {
   status?: string;
   position: { start: vscode.Position; end: vscode.Position };
   lastChanged: Date;
-  notionId?: string;
   notionUrl?: string;
 }
 
