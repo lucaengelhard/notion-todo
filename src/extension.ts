@@ -2,43 +2,20 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 import "dotenv/config";
-import { Client } from "@notionhq/client";
+
 import { ToDo, customProp } from "./types";
 import path from "path";
+import {
+  customMultiSelect,
+  customSelect,
+  dbKey,
+  notion,
+  rootFolder,
+} from "./config";
 
 var toDoStore: ToDo[] = [];
 
 var lastUpdated: number | undefined = undefined;
-
-const notion = new Client({
-  auth: vscode.workspace.getConfiguration("vscodeNotion.notion").get("apiKey"),
-});
-
-const dbKey: string | undefined = vscode.workspace
-  .getConfiguration("vscodeNotion.notion")
-  .get("dbKey");
-
-const rootFolder = vscode.workspace.workspaceFolders
-  ? vscode.workspace.workspaceFolders[0]
-  : undefined;
-
-const customMultiSelect: customProp = {
-  name: vscode.workspace
-    .getConfiguration("vscodeNotion.notion.additionalProps")
-    .get("Custom Multi-Select Name"),
-  property: vscode.workspace
-    .getConfiguration("vscodeNotion.notion.additionalProps")
-    .get("Custom Multi-Select Property"),
-};
-
-const customSelect: customProp = {
-  name: vscode.workspace
-    .getConfiguration("vscodeNotion.notion.additionalProps")
-    .get("Custom Select Name"),
-  property: vscode.workspace
-    .getConfiguration("vscodeNotion.notion.additionalProps")
-    .get("Custom Select Property"),
-};
 
 // This method is called when your extension is activated
 export async function activate(context: vscode.ExtensionContext) {
@@ -81,22 +58,6 @@ export async function activate(context: vscode.ExtensionContext) {
       console.log("waiting until next update cycle");
     }
   });
-}
-
-async function getWorkSpaceFiles() {
-  return await vscode.workspace.findFiles(
-    "**/*.{ts,js}",
-    "**/{node_modules,dist}/**"
-  );
-}
-
-async function updateTodos(uri: vscode.Uri) {
-  vscode.window.showInformationMessage(
-    `Updating Notion ToDos\n(${uri.path.split("/").pop()})`
-  );
-  const fileToDos = await getToDos(uri);
-  const notionToDos = await getNotionToDos();
-  mergeToDos(notionToDos);
 }
 
 // This method is called when your extension is deactivated
@@ -447,4 +408,20 @@ async function modifyComments() {
       vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
     );
   }
+}
+
+async function getWorkSpaceFiles() {
+  return await vscode.workspace.findFiles(
+    "**/*.{ts,js}",
+    "**/{node_modules,dist}/**"
+  );
+}
+
+async function updateTodos(uri: vscode.Uri) {
+  vscode.window.showInformationMessage(
+    `Updating Notion ToDos\n(${uri.path.split("/").pop()})`
+  );
+  const fileToDos = await getToDos(uri);
+  const notionToDos = await getNotionToDos();
+  mergeToDos(notionToDos);
 }
