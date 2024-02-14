@@ -40,13 +40,10 @@ const customSelect: customProp = {
 export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
 
-  const workspaceFiles = await vscode.workspace.findFiles(
-    "**/*.{ts,js}",
-    "**/{node_modules,dist}/**"
-  );
+  const initalWorkSpaceFiles = await getWorkSpaceFiles();
 
-  for (let i = 0; i < workspaceFiles.length; i++) {
-    const file = workspaceFiles[i];
+  for (let i = 0; i < initalWorkSpaceFiles.length; i++) {
+    const file = initalWorkSpaceFiles[i];
     await getToDos(file);
   }
 
@@ -55,11 +52,34 @@ export async function activate(context: vscode.ExtensionContext) {
   mergeToDos(initialNotionToDos);
 
   vscode.workspace.onDidSaveTextDocument(async (event) => {
-    console.log(event);
-    const fileToDos = await getToDos(event.uri);
+    console.log("Saved File -> Updating Notion ToDos");
+    await updateTodos(event.uri);
+  });
+
+  const interval = setInterval(async () => {
+    console.log("Regular Update");
+
+    const workspaceFiles = await getWorkSpaceFiles();
+    for (let i = 0; i < workspaceFiles.length; i++) {
+      const file = workspaceFiles[i];
+      await getToDos(file);
+    }
     const notionToDos = await getNotionToDos();
     mergeToDos(notionToDos);
-  });
+  }, 300000);
+}
+
+async function getWorkSpaceFiles() {
+  return await vscode.workspace.findFiles(
+    "**/*.{ts,js}",
+    "**/{node_modules,dist}/**"
+  );
+}
+
+async function updateTodos(uri: vscode.Uri) {
+  const fileToDos = await getToDos(uri);
+  const notionToDos = await getNotionToDos();
+  mergeToDos(notionToDos);
 }
 
 // This method is called when your extension is deactivated
