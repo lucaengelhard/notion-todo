@@ -12,6 +12,10 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lucaengelhard/notion-todo"
+  },
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
