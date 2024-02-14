@@ -7,9 +7,13 @@ import { ToDo, customProp } from "./types";
 import path from "path";
 
 var toDoStore: ToDo[] = [];
+
+var lastUpdated: number | undefined = undefined;
+
 const notion = new Client({
   auth: vscode.workspace.getConfiguration("vscodeNotion.notion").get("apiKey"),
 });
+
 const dbKey: string | undefined = vscode.workspace
   .getConfiguration("vscodeNotion.notion")
   .get("dbKey");
@@ -51,11 +55,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
   mergeToDos(initialNotionToDos);
 
-  vscode.workspace.onDidSaveTextDocument(async (event) => {
-    console.log("Saved File -> Updating Notion ToDos");
-    await updateTodos(event.uri);
-  });
-
   const interval = setInterval(async () => {
     vscode.window.showInformationMessage("Updating Notion ToDos (Interval)");
 
@@ -67,6 +66,21 @@ export async function activate(context: vscode.ExtensionContext) {
     const notionToDos = await getNotionToDos();
     mergeToDos(notionToDos);
   }, 300000);
+
+  vscode.workspace.onDidSaveTextDocument(async (event) => {
+    const currentDate = Date.now();
+
+    if (!lastUpdated) {
+      lastUpdated = currentDate;
+    }
+
+    if (currentDate - lastUpdated > 150000) {
+      console.log("Saved File -> Updating Notion ToDos");
+      await updateTodos(event.uri);
+    } else {
+      console.log("waiting until next update cycle");
+    }
+  });
 }
 
 async function getWorkSpaceFiles() {
@@ -93,19 +107,23 @@ async function getToDos(fileUri: vscode.Uri) {
   const file = await vscode.workspace.openTextDocument(fileUri);
   const lastChanged = new Date((await vscode.workspace.fs.stat(fileUri)).mtime);
 
-  const regex = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
+  const regExFindTodo = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
+  const regExReplaceComments = /\/\/\s*TODO:|\/\*\s*TODO:/gm;
+  const regExNotionLink = /\((.*?)\)[^()]*$/gm;
+  const regExNotionId = /[^-]*$/gm;
 
   const text = file.getText();
 
   let match;
 
-  while ((match = regex.exec(text))) {
+  while ((match = regExFindTodo.exec(text))) {
     const startPos = file.positionAt(match.index);
     const endPos = file.positionAt(match.index + match[0].length);
 
     const sanitizedToDO = match[0]
-      .replace(/\/\/\s*TODO:|\/\*\s*TODO:/gm, "")
+      .replace(regExReplaceComments, "")
       .replace("*/", "")
+      .replace(regExNotionLink, "")
       .trim();
 
     const fileName = fileUri.path.split("/").pop();
@@ -116,12 +134,43 @@ async function getToDos(fileUri: vscode.Uri) {
       filePath = path.relative(rootFolder.uri.path, fileUri.path);
     }
 
+    const notionUrlMatches = regExNotionLink.exec(match[0]);
+
+    let notionId: string;
+    let notionUrl: string;
+
+    if (!notionUrlMatches) {
+      const notionToDo: ToDo = {
+        filename: fileName,
+        path: filePath,
+        toDo: sanitizedToDO,
+        position: { start: startPos, end: endPos },
+        lastChanged: lastChanged,
+      };
+      const res: any = await createNotionTodo(notionToDo);
+
+      notionId = res.id;
+      notionUrl = res.url;
+    } else {
+      notionUrl = notionUrlMatches[1];
+
+      const notionIdMatches = regExNotionId.exec(notionUrl);
+
+      if (!notionIdMatches) {
+        notionId = "no id defined";
+      } else {
+        notionId = notionIdMatches[0].replace("'", "");
+      }
+    }
+
     toDoStore.push({
       filename: fileName,
       path: filePath,
       toDo: sanitizedToDO,
       position: { start: startPos, end: endPos },
       lastChanged: lastChanged,
+      notionId: notionId,
+      notionUrl: notionUrl,
     });
   }
 }
@@ -136,10 +185,20 @@ async function getNotionToDos(): Promise<ToDo[]> {
   const res = await notion.databases.query({
     database_id: dbKey,
     filter: {
-      property: "VS Code Todo",
-      checkbox: {
-        equals: true,
-      },
+      and: [
+        {
+          property: "VS Code Todo",
+          checkbox: {
+            equals: true,
+          },
+        },
+        {
+          property: "Tags",
+          multi_select: {
+            contains: rootFolder ? rootFolder.name : "vscode",
+          },
+        },
+      ],
     },
   });
 
@@ -152,6 +211,7 @@ async function getNotionToDos(): Promise<ToDo[]> {
       position: JSON.parse(element.properties.Position.rich_text[0].plain_text),
       lastChanged: new Date(element.last_edited_time),
       notionId: element.id,
+      notionUrl: element.url,
     };
 
     notionToDos.push(toDo);
@@ -168,24 +228,26 @@ async function mergeToDos(notionToDos: ToDo[]) {
     for (let u = 0; u < notionToDos.length; u++) {
       const notionToDo = notionToDos[u];
 
-      if (toDo.path === notionToDo.path) {
-        if (
-          toDo.position.start.line >= notionToDo.position.start.line &&
-          toDo.position.start.line <= notionToDo.position.end.line
-        ) {
-          console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
-          intersecting = true;
+      //console.log({ local: toDo.notionId?.replaceAll("-", "") });
+      //console.log({ notion: notionToDo.notionId?.replaceAll("-", "") });
 
-          if (toDo.lastChanged > notionToDo.lastChanged) {
-            console.log(`VS Code Todo "${toDo.toDo}" is newer`);
+      if (
+        toDo.notionId?.replaceAll("-", "") ===
+        notionToDo.notionId?.replaceAll("-", "")
+      ) {
+        console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
+        intersecting = true;
 
-            upDateNotionToDo(toDo, notionToDo);
-          }
-          if (toDo.lastChanged < notionToDo.lastChanged) {
-            console.log(`Notion Todo "${toDo.toDo}" is newer`);
+        if (toDo.lastChanged > notionToDo.lastChanged) {
+          console.log(`VS Code Todo "${toDo.toDo}" is newer`);
 
-            toDoStore[i] = notionToDo;
-          }
+          upDateNotionToDo(toDo, notionToDo);
+          toDoStore[i] = toDo;
+        }
+        if (toDo.lastChanged < notionToDo.lastChanged) {
+          console.log(`Notion Todo "${toDo.toDo}" is newer`);
+
+          toDoStore[i] = notionToDo;
         }
       }
     }
@@ -195,7 +257,9 @@ async function mergeToDos(notionToDos: ToDo[]) {
       createNotionTodo(toDo);
     }
   }
+  await modifyComments();
   vscode.window.showInformationMessage("Updating Notion ToDos done");
+  //console.log(toDoStore);
 }
 
 async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
@@ -333,4 +397,54 @@ async function createNotionTodo(toDo: ToDo) {
   });
 
   console.log("Notion ToDo created");
+
+  return response;
+}
+
+async function modifyComments() {
+  const commentstart = "//";
+
+  for (let i = 0; i < toDoStore.length; i++) {
+    if (!vscode.workspace.workspaceFolders) {
+      throw new Error("No Workspace Folders Open");
+    }
+
+    const toDo = toDoStore[i];
+    const replacementString =
+      commentstart + `TODO: ${toDo.toDo} (${toDo.notionUrl})`;
+
+    //console.log({ [toDo.path]: toDo.position.start.line });
+
+    const startPositon = new vscode.Position(
+      toDo.position.start.line,
+      toDo.position.start.character
+    );
+
+    //console.log({ start: startPositon });
+
+    const endPosition = new vscode.Position(
+      toDo.position.end.line,
+      replacementString.length
+    );
+
+    //console.log({ end: endPosition });
+
+    const range = new vscode.Range(startPositon, endPosition);
+    const edit = new vscode.WorkspaceEdit();
+
+    //console.log(range.start.line);
+    //console.log(range);
+
+    edit.replace(
+      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path),
+      range,
+      replacementString
+    );
+
+    const edited = await vscode.workspace.applyEdit(edit);
+    lastUpdated = Date.now();
+    const saved = await vscode.workspace.save(
+      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
+    );
+  }
 }

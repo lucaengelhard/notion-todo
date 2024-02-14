@@ -8,6 +8,7 @@ export interface ToDo {
   position: { start: vscode.Position; end: vscode.Position };
   lastChanged: Date;
   notionId?: string;
+  notionUrl?: string;
 }
 
 export interface customProp {
