@@ -1,7 +1,7 @@
 {
   "name": "notion-todo",
   "displayName": "Notion Todo",
-  "description": "This VS Code extensions parses .js and .ts files, searches for \/\/TODO: comments and creates database entries in a given notion database",
+  "description": "This VS Code extensions parses .js and .ts files, searches for TODO: comments and creates database entries in a given notion database",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.86.0"
