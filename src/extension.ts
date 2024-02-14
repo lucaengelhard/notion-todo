@@ -7,6 +7,9 @@ import { ToDo, customProp } from "./types";
 import path from "path";
 
 var toDoStore: ToDo[] = [];
+
+var lastUpdated: number | undefined = undefined;
+
 const notion = new Client({
   auth: vscode.workspace.getConfiguration("vscodeNotion.notion").get("apiKey"),
 });
@@ -52,11 +55,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
   mergeToDos(initialNotionToDos);
 
-  vscode.workspace.onDidSaveTextDocument(async (event) => {
-    console.log("Saved File -> Updating Notion ToDos");
-    await updateTodos(event.uri);
-  });
-
   const interval = setInterval(async () => {
     vscode.window.showInformationMessage("Updating Notion ToDos (Interval)");
 
@@ -68,6 +66,21 @@ export async function activate(context: vscode.ExtensionContext) {
     const notionToDos = await getNotionToDos();
     mergeToDos(notionToDos);
   }, 300000);
+
+  vscode.workspace.onDidSaveTextDocument(async (event) => {
+    const currentDate = Date.now();
+
+    if (!lastUpdated) {
+      lastUpdated = currentDate;
+    }
+
+    if (currentDate - lastUpdated > 150000) {
+      console.log("Saved File -> Updating Notion ToDos");
+      await updateTodos(event.uri);
+    } else {
+      console.log("waiting until next update cycle");
+    }
+  });
 }
 
 async function getWorkSpaceFiles() {
@@ -148,8 +161,6 @@ async function getToDos(fileUri: vscode.Uri) {
       } else {
         notionId = notionIdMatches[0].replace("'", "");
       }
-
-      console.log(notionId);
     }
 
     toDoStore.push({
@@ -174,10 +185,20 @@ async function getNotionToDos(): Promise<ToDo[]> {
   const res = await notion.databases.query({
     database_id: dbKey,
     filter: {
-      property: "VS Code Todo",
-      checkbox: {
-        equals: true,
-      },
+      and: [
+        {
+          property: "VS Code Todo",
+          checkbox: {
+            equals: true,
+          },
+        },
+        {
+          property: "Tags",
+          multi_select: {
+            contains: rootFolder ? rootFolder.name : "vscode",
+          },
+        },
+      ],
     },
   });
 
@@ -207,7 +228,13 @@ async function mergeToDos(notionToDos: ToDo[]) {
     for (let u = 0; u < notionToDos.length; u++) {
       const notionToDo = notionToDos[u];
 
-      if (toDo.notionId === notionToDo.notionId) {
+      //console.log({ local: toDo.notionId?.replaceAll("-", "") });
+      //console.log({ notion: notionToDo.notionId?.replaceAll("-", "") });
+
+      if (
+        toDo.notionId?.replaceAll("-", "") ===
+        notionToDo.notionId?.replaceAll("-", "")
+      ) {
         console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
         intersecting = true;
 
@@ -230,8 +257,9 @@ async function mergeToDos(notionToDos: ToDo[]) {
       createNotionTodo(toDo);
     }
   }
+  await modifyComments();
   vscode.window.showInformationMessage("Updating Notion ToDos done");
-  console.log(toDoStore);
+  //console.log(toDoStore);
 }
 
 async function upDateNotionToDo(toDo: ToDo, notionToDo: ToDo) {
@@ -371,4 +399,52 @@ async function createNotionTodo(toDo: ToDo) {
   console.log("Notion ToDo created");
 
   return response;
+}
+
+async function modifyComments() {
+  const commentstart = "//";
+
+  for (let i = 0; i < toDoStore.length; i++) {
+    if (!vscode.workspace.workspaceFolders) {
+      throw new Error("No Workspace Folders Open");
+    }
+
+    const toDo = toDoStore[i];
+    const replacementString =
+      commentstart + `TODO: ${toDo.toDo} (${toDo.notionUrl})`;
+
+    //console.log({ [toDo.path]: toDo.position.start.line });
+
+    const startPositon = new vscode.Position(
+      toDo.position.start.line,
+      toDo.position.start.character
+    );
+
+    //console.log({ start: startPositon });
+
+    const endPosition = new vscode.Position(
+      toDo.position.end.line,
+      replacementString.length
+    );
+
+    //console.log({ end: endPosition });
+
+    const range = new vscode.Range(startPositon, endPosition);
+    const edit = new vscode.WorkspaceEdit();
+
+    //console.log(range.start.line);
+    //console.log(range);
+
+    edit.replace(
+      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path),
+      range,
+      replacementString
+    );
+
+    const edited = await vscode.workspace.applyEdit(edit);
+    lastUpdated = Date.now();
+    const saved = await vscode.workspace.save(
+      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
+    );
+  }
 }
