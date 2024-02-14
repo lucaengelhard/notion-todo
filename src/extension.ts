@@ -207,32 +207,27 @@ async function mergeToDos(notionToDos: ToDo[]) {
     for (let u = 0; u < notionToDos.length; u++) {
       const notionToDo = notionToDos[u];
 
-      if (toDo.path === notionToDo.path) {
-        if (
-          toDo.position.start.line >= notionToDo.position.start.line &&
-          toDo.position.start.line <= notionToDo.position.end.line
-        ) {
-          console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
-          intersecting = true;
+      if (toDo.notionId === notionToDo.notionId) {
+        console.log(`${toDo.toDo} (${toDo.path}) is intersecting`);
+        intersecting = true;
 
-          if (toDo.lastChanged > notionToDo.lastChanged) {
-            console.log(`VS Code Todo "${toDo.toDo}" is newer`);
+        if (toDo.lastChanged > notionToDo.lastChanged) {
+          console.log(`VS Code Todo "${toDo.toDo}" is newer`);
 
-            upDateNotionToDo(toDo, notionToDo);
-            toDoStore[i] = toDo;
-          }
-          if (toDo.lastChanged < notionToDo.lastChanged) {
-            console.log(`Notion Todo "${toDo.toDo}" is newer`);
+          upDateNotionToDo(toDo, notionToDo);
+          toDoStore[i] = toDo;
+        }
+        if (toDo.lastChanged < notionToDo.lastChanged) {
+          console.log(`Notion Todo "${toDo.toDo}" is newer`);
 
-            toDoStore[i] = notionToDo;
-          }
+          toDoStore[i] = notionToDo;
         }
       }
     }
 
     if (!intersecting) {
       console.log(`${toDo.toDo} (${toDo.path}) is not intersecting`);
-      //createNotionTodo(toDo);
+      createNotionTodo(toDo);
     }
   }
   vscode.window.showInformationMessage("Updating Notion ToDos done");
