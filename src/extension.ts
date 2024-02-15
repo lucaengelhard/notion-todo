@@ -15,7 +15,7 @@ import {
 
 var toDoStore: Map<string, ToDo> = new Map();
 
-var lastUpdated: number | undefined = undefined;
+var extensionIsSaving = false;
 
 // This method is called when your extension is activated
 export async function activate(context: vscode.ExtensionContext) {
@@ -45,17 +45,11 @@ export async function activate(context: vscode.ExtensionContext) {
   }, 300000);
 
   vscode.workspace.onDidSaveTextDocument(async (event) => {
-    const currentDate = Date.now();
-
-    if (!lastUpdated) {
-      lastUpdated = currentDate;
-    }
-
-    if (currentDate - lastUpdated > 150000) {
+    if (!extensionIsSaving) {
       console.log("Saved File -> Updating Notion ToDos");
       await updateTodos(event.uri);
     } else {
-      console.log("waiting until next update cycle");
+      console.log("extension is currently saving");
     }
   });
 }
@@ -415,10 +409,15 @@ async function modifyComments() {
     );
 
     const edited = await vscode.workspace.applyEdit(edit);
-    lastUpdated = Date.now();
-    const saved = await vscode.workspace.save(
-      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
-    );
+    if (edited) {
+      extensionIsSaving = true;
+      const saved = await vscode.workspace.save(
+        vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
+      );
+      console.log(`${saved} saved`);
+
+      extensionIsSaving = false;
+    }
   }
 }
 
