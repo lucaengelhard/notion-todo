@@ -115,7 +115,7 @@ async function getToDos(fileUri: vscode.Uri) {
     } else {
       notionUrl = notionUrlMatches[1];
 
-      const notionIdMatches = regExNotionId.exec(notionUrl);
+      const notionIdMatches = notionUrl.match(regExNotionId);
 
       if (!notionIdMatches) {
         notionId = "no id defined";
@@ -158,6 +158,12 @@ async function getNotionToDos(): Promise<Map<string, ToDo>> {
             contains: rootFolder ? rootFolder.name : "vscode",
           },
         },
+        {
+          property: "Status",
+          select: {
+            does_not_equal: "Completed",
+          },
+        },
       ],
     },
   });
@@ -175,6 +181,8 @@ async function getNotionToDos(): Promise<Map<string, ToDo>> {
 
     notionToDos.set(element.id.replaceAll("-", ""), toDo);
   });
+
+  await notionToDosToCompleted(notionToDos);
 
   return notionToDos;
 }
@@ -249,6 +257,31 @@ async function upDateNotionToDo(toDo: ToDo, id: string) {
   });
 
   console.log("updated Notion");
+}
+
+async function notionToDosToCompleted(notionToDos: Map<string, ToDo>) {
+  notionToDos.forEach(async (toDo, key, map) => {
+    const localToDo = toDoStore.get(key);
+
+    if (!localToDo) {
+      console.log(
+        `${toDo.toDo} (${toDo.path}) has no local comment -> moving to completed`
+      );
+
+      notionToDos.delete(key);
+
+      const res = await notion.pages.update({
+        page_id: key,
+        properties: {
+          Status: {
+            select: {
+              name: "Completed",
+            },
+          },
+        },
+      });
+    }
+  });
 }
 
 async function createNotionTodo(toDo: ToDo) {
