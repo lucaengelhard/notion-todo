@@ -1,19 +1,28 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 import "dotenv/config";
 
-import { ToDo, customProp } from "./types";
-import path from "path";
-import {
-  customMultiSelect,
-  customSelect,
-  dbKey,
-  notion,
-  rootFolder,
-} from "./config";
+import { ToDo } from "./types";
 
-var toDoStore: Map<string, ToDo> = new Map();
+import {
+  getFilePath,
+  getNotionIdFromUrl,
+  getWorkspaceFiles,
+  regExFindTodo,
+  regExNotionLink,
+  sanitizeIdString,
+  sanitizeToDoString,
+  sanitizeUrlString,
+} from "./helpers";
+import {
+  createNotionTodo,
+  getNotionToDos,
+  notionToDoToCompleted,
+  upDateNotionToDo,
+} from "./notion";
+
+export var workspaceFiles: vscode.Uri[] = [];
+export var toDoStore: Map<string, ToDo> = new Map();
+export var notionToDoStore: Map<string, ToDo> = new Map();
 
 var extensionIsSaving = false;
 
@@ -21,6 +30,8 @@ var extensionIsSaving = false;
 export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
 
+  await initialLoad();
+  /*
   const initalWorkSpaceFiles = await getWorkSpaceFiles();
 
   for (let i = 0; i < initalWorkSpaceFiles.length; i++) {
@@ -51,388 +62,155 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
       console.log("extension is currently saving");
     }
-  });
+  });*/
 }
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
 
-async function getToDos(fileUri: vscode.Uri) {
-  //const file = await vscode.workspace.fs.readFile(fileUri);
+async function initialLoad() {
+  workspaceFiles = await getWorkspaceFiles();
+  notionToDoStore = await getNotionToDos();
+  toDoStore = await getToDos();
+
+  notionToDoStore.forEach(async (toDo, id) => {
+    await notionToDoToCompleted(id, toDo);
+  });
+
+  console.log({ local: toDoStore, notion: notionToDoStore });
+
+  //vscode.window.showInformationMessage("Initial load of notion todos done");
+}
+
+async function getToDos() {
+  for (let i = 0; i < workspaceFiles.length; i++) {
+    await parseFile(workspaceFiles[i]);
+  }
+
+  return toDoStore;
+}
+
+async function parseFile(fileUri: vscode.Uri) {
   const file = await vscode.workspace.openTextDocument(fileUri);
+  const fileName = fileUri.path.split("/").pop();
+  const filePath = getFilePath(fileUri);
   const lastChanged = new Date((await vscode.workspace.fs.stat(fileUri)).mtime);
-
-  const regExFindTodo = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
-  const regExReplaceComments = /\/\/\s*TODO:|\/\*\s*TODO:/gm;
-  const regExNotionLink = /\((.*?)\)[^()]*$/gm;
-  const regExNotionId = /[^-]*$/gm;
-
   const text = file.getText();
 
   let match;
-
   while ((match = regExFindTodo.exec(text))) {
-    const startPos = file.positionAt(match.index);
-    const endPos = file.positionAt(match.index + match[0].length);
-
-    const sanitizedToDO = match[0]
-      .replace(regExReplaceComments, "")
-      .replace("*/", "")
-      .replace(regExNotionLink, "")
-      .trim();
-
-    const fileName = fileUri.path.split("/").pop();
-
-    let filePath = fileUri.path;
-
-    if (rootFolder) {
-      filePath = path.relative(rootFolder.uri.path, fileUri.path);
-    }
-
-    const notionUrlMatches = regExNotionLink.exec(match[0]);
-
-    let notionId: string;
-    let notionUrl: string;
-
-    if (!notionUrlMatches) {
-      const notionToDo: ToDo = {
-        filename: fileName,
-        path: filePath,
-        toDo: sanitizedToDO,
-        position: { start: startPos, end: endPos },
-        lastChanged: lastChanged,
-      };
-      const res: any = await createNotionTodo(notionToDo);
-
-      notionId = res.id.replaceAll("-", "");
-      notionUrl = res.url;
-    } else {
-      notionUrl = notionUrlMatches[1];
-
-      const notionIdMatches = notionUrl.match(regExNotionId);
-
-      if (!notionIdMatches) {
-        notionId = "no id defined";
-      } else {
-        notionId = notionIdMatches[0].replace("'", "").replaceAll("-", "");
-      }
-    }
-
-    toDoStore.set(notionId.replaceAll("-", ""), {
+    const localToDo: ToDo = {
+      toDo: sanitizeToDoString(match[0]),
+      position: {
+        start: file.positionAt(match.index),
+        end: file.positionAt(match.index + match[0].length),
+      },
       filename: fileName,
       path: filePath,
-      toDo: sanitizedToDO,
-      position: { start: startPos, end: endPos },
       lastChanged: lastChanged,
-      notionUrl: notionUrl,
-    });
-  }
-}
-
-async function getNotionToDos(): Promise<Map<string, ToDo>> {
-  let notionToDos: Map<string, ToDo> = new Map();
-
-  if (!dbKey) {
-    throw new Error("no Notion Database Id given");
-  }
-
-  const res = await notion.databases.query({
-    database_id: dbKey,
-    filter: {
-      and: [
-        {
-          property: "VS Code Todo",
-          checkbox: {
-            equals: true,
-          },
-        },
-        {
-          property: "Tags",
-          multi_select: {
-            contains: rootFolder ? rootFolder.name : "vscode",
-          },
-        },
-        {
-          property: "Status",
-          select: {
-            does_not_equal: "Completed",
-          },
-        },
-      ],
-    },
-  });
-
-  res.results.forEach((element: any) => {
-    const toDo: ToDo = {
-      toDo: element.properties.Name.title[0].plain_text,
-      filename: element.properties["File Name"].rich_text[0].plain_text,
-      path: element.properties["File Path"].rich_text[0].plain_text,
-      status: element.properties.Status.select.name,
-      position: JSON.parse(element.properties.Position.rich_text[0].plain_text),
-      lastChanged: new Date(element.last_edited_time),
-      notionUrl: element.url,
     };
 
-    notionToDos.set(element.id.replaceAll("-", ""), toDo);
-  });
+    //Check if there is a notion url attached to the comment
+    const notionUrlMatches = regExNotionLink.exec(match[0]);
 
-  await notionToDosToCompleted(notionToDos);
+    //If there is a notionUrl attached, check in the notionStore if the todo was completed
+    if (notionUrlMatches) {
+      localToDo.notionUrl = sanitizeUrlString(notionUrlMatches[0]);
 
-  return notionToDos;
-}
+      const id = getNotionIdFromUrl(localToDo.notionUrl);
+      const notionToDo = notionToDoStore.get(id);
 
-async function mergeToDos(notionToDos: Map<string, ToDo>) {
-  toDoStore.forEach((toDo, localId) => {
-    const id = localId.replaceAll("-", "");
-
-    const notionToDo = notionToDos.get(id);
-
-    if (notionToDo) {
-      if (notionToDo.lastChanged > toDo.lastChanged) {
-        console.log(`Notion Todo "${toDo.toDo}" is newer`);
-        toDoStore.set(id, notionToDo);
+      if (!notionToDo) {
+        //TODO: create notion todo and update id in both stores
       }
 
-      if (notionToDo.lastChanged <= toDo.lastChanged) {
-        console.log(`VS Code Todo "${toDo.toDo}" is newer`);
-        upDateNotionToDo(toDo, id);
+      console.log(notionToDo?.status);
+
+      if (notionToDo && notionToDo.status === "Completed") {
+        localToDo.status = "Completed";
+        await modifyComment(localToDo);
+        toDoStore.delete(id);
+        continue;
+      }
+
+      if (notionToDo) {
+        const mergedToDo = await mergeToDos(localToDo, notionToDo, id);
+        toDoStore.set(id, mergedToDo);
+      } else {
+        toDoStore.set(id, localToDo);
       }
     } else {
-      console.log(`${toDo.toDo} (${toDo.path}) is not intersecting`);
-      //createNotionTodo(toDo);
+      const res: any = await createNotionTodo(localToDo);
+
+      const id = sanitizeIdString(res.id);
+      localToDo.notionUrl = sanitizeUrlString(res.url);
+
+      toDoStore.set(id, localToDo);
+      notionToDoStore.set(id, localToDo);
+      await modifyComment(localToDo);
     }
-  });
-  await modifyComments();
-  vscode.window.showInformationMessage("Updating Notion ToDos done");
+  }
 }
 
-async function upDateNotionToDo(toDo: ToDo, id: string) {
-  const response = await notion.pages.update({
-    page_id: id,
-    properties: {
-      Name: {
-        title: [
-          {
-            text: {
-              content: toDo.toDo,
-            },
-          },
-        ],
-      },
-      "VS Code Todo": {
-        checkbox: true,
-      },
-      Tags: {
-        multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
-      },
-      ...(customSelect.name
-        ? {
-            [customSelect.name]: {
-              select: {
-                name: customSelect.property ? customSelect.property : "",
-              },
-            },
-          }
-        : {}),
-      ...(customMultiSelect.name
-        ? {
-            [customMultiSelect.name]: {
-              multi_select: [
-                {
-                  name: customMultiSelect.property
-                    ? customMultiSelect.property
-                    : "",
-                },
-              ],
-            },
-          }
-        : {}),
-    },
-  });
+async function mergeToDos(toDo: ToDo, notionToDo: ToDo, id: string) {
+  let mergedToDo: ToDo;
+  if (notionToDo.lastChanged > toDo.lastChanged) {
+    console.log(`Notion Todo "${toDo.toDo}" is newer`);
+    toDoStore.set(id, notionToDo);
 
-  console.log("updated Notion");
-}
-
-async function notionToDosToCompleted(notionToDos: Map<string, ToDo>) {
-  notionToDos.forEach(async (toDo, key, map) => {
-    const localToDo = toDoStore.get(key);
-
-    if (!localToDo) {
-      console.log(
-        `${toDo.toDo} (${toDo.path}) has no local comment -> moving to completed`
-      );
-
-      notionToDos.delete(key);
-
-      const res = await notion.pages.update({
-        page_id: key,
-        properties: {
-          Status: {
-            select: {
-              name: "Completed",
-            },
-          },
-        },
-      });
-    }
-  });
-}
-
-async function createNotionTodo(toDo: ToDo) {
-  if (!dbKey) {
-    throw new Error("no Notion Database Id given");
+    mergedToDo = notionToDo;
+  } else {
+    console.log(`VS Code Todo "${toDo.toDo}" is newer`);
+    upDateNotionToDo(toDo, id);
+    notionToDoStore.set(id, toDo);
+    mergedToDo = toDo;
   }
 
-  const response = await notion.pages.create({
-    parent: {
-      type: "database_id",
-      database_id: dbKey,
-    },
-    properties: {
-      Name: {
-        title: [
-          {
-            text: {
-              content: toDo.toDo,
-            },
-          },
-        ],
-      },
-      "File Name": {
-        rich_text: [
-          {
-            text: {
-              content: toDo.filename ? toDo.filename : "",
-            },
-          },
-        ],
-      },
-      "File Path": {
-        rich_text: [
-          {
-            text: {
-              content: toDo.path ? toDo.path : "",
-            },
-          },
-        ],
-      },
-      Position: {
-        rich_text: [
-          {
-            text: {
-              content: JSON.stringify(toDo.position),
-            },
-          },
-        ],
-      },
-      Status: {
-        select: {
-          name: "Not Started",
-        },
-      },
-      "VS Code Todo": {
-        checkbox: true,
-      },
-      Tags: {
-        multi_select: [{ name: rootFolder ? rootFolder.name : "vscode" }],
-      },
-      ...(customSelect.name
-        ? {
-            [customSelect.name]: {
-              select: {
-                name: customSelect.property ? customSelect.property : "",
-              },
-            },
-          }
-        : {}),
-      ...(customMultiSelect.name
-        ? {
-            [customMultiSelect.name]: {
-              multi_select: [
-                {
-                  name: customMultiSelect.property
-                    ? customMultiSelect.property
-                    : "",
-                },
-              ],
-            },
-          }
-        : {}),
-    },
-  });
+  await modifyComment(mergedToDo);
 
-  console.log("Notion ToDo created");
-
-  return response;
+  return mergedToDo;
 }
 
-async function modifyComments() {
+async function modifyComment(toDo: ToDo) {
   const commentstart = "//";
-  const iterator = toDoStore.entries();
 
-  for (let i = 0; i < toDoStore.size; i++) {
-    if (!vscode.workspace.workspaceFolders) {
-      throw new Error("No Workspace Folders Open");
-    }
-
-    const toDo: ToDo = iterator.next().value[1];
-
-    const replacementString =
-      commentstart + `TODO: ${toDo.toDo} (${toDo.notionUrl})`;
-
-    //console.log({ [toDo.path]: toDo.position.start.line });
-
-    const startPositon = new vscode.Position(
-      toDo.position.start.line,
-      toDo.position.start.character
-    );
-
-    //console.log({ start: startPositon });
-
-    const endPosition = new vscode.Position(
-      toDo.position.end.line,
-      replacementString.length
-    );
-
-    //console.log({ end: endPosition });
-
-    const range = new vscode.Range(startPositon, endPosition);
-    const edit = new vscode.WorkspaceEdit();
-
-    //console.log(range.start.line);
-    //console.log(range);
-
-    edit.replace(
-      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path),
-      range,
-      replacementString
-    );
-
-    const edited = await vscode.workspace.applyEdit(edit);
-    if (edited) {
-      extensionIsSaving = true;
-      const saved = await vscode.workspace.save(
-        vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
-      );
-      console.log(`${saved} saved`);
-
-      extensionIsSaving = false;
-    }
+  if (!vscode.workspace.workspaceFolders) {
+    throw new Error("No Workspace Folders Open");
   }
-}
 
-async function getWorkSpaceFiles() {
-  return await vscode.workspace.findFiles(
-    "**/*.{ts,js}",
-    "**/{node_modules,dist}/**"
-  );
-}
+  let replacementString = `${commentstart}TODO: ${toDo.toDo} (${toDo.notionUrl})`;
 
-async function updateTodos(uri: vscode.Uri) {
-  vscode.window.showInformationMessage(
-    `Updating Notion ToDos\n(${uri.path.split("/").pop()})`
+  const endPosition = new vscode.Position(
+    toDo.position.end.line,
+    replacementString.length
   );
-  const fileToDos = await getToDos(uri);
-  const notionToDos = await getNotionToDos();
-  mergeToDos(notionToDos);
+
+  const startPositon = new vscode.Position(
+    toDo.position.start.line,
+    toDo.position.start.character
+  );
+
+  if (toDo.status === "Completed") {
+    replacementString = " ";
+  }
+
+  const range = new vscode.Range(startPositon, endPosition);
+  const edit = new vscode.WorkspaceEdit();
+
+  edit.replace(
+    vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path),
+    range,
+    replacementString
+  );
+
+  const edited = await vscode.workspace.applyEdit(edit);
+  if (edited) {
+    extensionIsSaving = true;
+    const saved = await vscode.workspace.save(
+      vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, toDo.path)
+    );
+    console.log(`${saved} saved`);
+
+    extensionIsSaving = false;
+  }
 }
