@@ -20,7 +20,7 @@ import {
   notionToDoToCompleted,
   upDateNotionToDo,
 } from "./notion";
-import { Status } from "./enums";
+
 import { notion } from "./config";
 
 export var workspaceFiles: vscode.Uri[] = [];
@@ -50,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       toDoStore.forEach(async (toDo, id, map) => {
         if (!fileIds.has(id)) {
-          toDo.status = Status.completed;
+          toDo.status = "Completed";
           notionToDoStore.delete(id);
           const res = await notion.pages.update({
             page_id: id,
@@ -141,7 +141,7 @@ async function parseFile(fileUri: vscode.Uri) {
             properties: {
               Status: {
                 select: {
-                  name: Status.inProgress,
+                  name: "In Progress",
                 },
               },
             },
@@ -155,7 +155,7 @@ async function parseFile(fileUri: vscode.Uri) {
       console.log(notionToDo?.status);
 
       if (notionToDo && notionToDo.status === "Completed") {
-        localToDo.status = Status.completed;
+        localToDo.status = "Completed";
         await modifyComment(localToDo);
         toDoStore.delete(id);
         continue;

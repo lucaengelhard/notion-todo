@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import { Status } from "./enums";
 
-export interface ToDo {
+export type Status = "No Status" | "Not Started" | "In Progress" | "Completed";
+
+export type ToDo = {
   filename: string | undefined;
   path: string;
   toDo: string;
@@ -9,9 +10,9 @@ export interface ToDo {
   position: { start: vscode.Position; end: vscode.Position };
   lastChanged: Date;
   notionUrl?: string;
-}
+};
 
-export interface customProp {
+export type customProp = {
   name?: string;
   property?: string;
-}
+};
