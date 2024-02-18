@@ -6,6 +6,7 @@ import { ToDo } from "./types";
 import {
   getFilePath,
   getNotionIdFromUrl,
+  getToDoIdsInFile,
   getWorkspaceFiles,
   regExFindTodo,
   regExNotionLink,
@@ -19,6 +20,8 @@ import {
   notionToDoToCompleted,
   upDateNotionToDo,
 } from "./notion";
+import { Status } from "./enums";
+import { notion } from "./config";
 
 export var workspaceFiles: vscode.Uri[] = [];
 export var toDoStore: Map<string, ToDo> = new Map();
@@ -31,38 +34,41 @@ export async function activate(context: vscode.ExtensionContext) {
   console.log("notion-todo is now active!");
 
   await initialLoad();
-  /*
-  const initalWorkSpaceFiles = await getWorkSpaceFiles();
-
-  for (let i = 0; i < initalWorkSpaceFiles.length; i++) {
-    const file = initalWorkSpaceFiles[i];
-    await getToDos(file);
-  }
-
-  const initialNotionToDos = await getNotionToDos();
-
-  mergeToDos(initialNotionToDos);
 
   const interval = setInterval(async () => {
-    vscode.window.showInformationMessage("Updating Notion ToDos (Interval)");
-
-    const workspaceFiles = await getWorkSpaceFiles();
-    for (let i = 0; i < workspaceFiles.length; i++) {
-      const file = workspaceFiles[i];
-      await getToDos(file);
-    }
-    const notionToDos = await getNotionToDos();
-    mergeToDos(notionToDos);
+    await initialLoad();
   }, 300000);
 
   vscode.workspace.onDidSaveTextDocument(async (event) => {
     if (!extensionIsSaving) {
       console.log("Saved File -> Updating Notion ToDos");
-      await updateTodos(event.uri);
+      await parseFile(event.uri);
+
+      const file = await vscode.workspace.openTextDocument(event.uri);
+      const text = file.getText();
+      const fileIds = getToDoIdsInFile(text);
+
+      toDoStore.forEach(async (toDo, id, map) => {
+        if (!fileIds.has(id)) {
+          toDo.status = Status.completed;
+          notionToDoStore.delete(id);
+          const res = await notion.pages.update({
+            page_id: id,
+            properties: {
+              Status: {
+                select: {
+                  name: "Completed",
+                },
+              },
+            },
+          });
+        }
+      });
     } else {
       console.log("extension is currently saving");
     }
-  });*/
+    console.log({ local: toDoStore, notion: notionToDoStore });
+  });
 }
 
 // This method is called when your extension is deactivated
@@ -118,16 +124,38 @@ async function parseFile(fileUri: vscode.Uri) {
       localToDo.notionUrl = sanitizeUrlString(notionUrlMatches[0]);
 
       const id = getNotionIdFromUrl(localToDo.notionUrl);
-      const notionToDo = notionToDoStore.get(id);
+      let notionToDo = notionToDoStore.get(id);
 
       if (!notionToDo) {
         //TODO: create notion todo and update id in both stores
+
+        console.log(
+          "Notion Url detected, but no Notion ToDo found in database"
+        );
+
+        try {
+          const checkPage = await notion.pages.retrieve({ page_id: id });
+          console.log("page exists");
+          const res = await notion.pages.update({
+            page_id: id,
+            properties: {
+              Status: {
+                select: {
+                  name: Status.inProgress,
+                },
+              },
+            },
+          });
+
+          notionToDoStore.set(id, localToDo);
+          notionToDo = notionToDoStore.get(id);
+        } catch (error) {}
       }
 
       console.log(notionToDo?.status);
 
       if (notionToDo && notionToDo.status === "Completed") {
-        localToDo.status = "Completed";
+        localToDo.status = Status.completed;
         await modifyComment(localToDo);
         toDoStore.delete(id);
         continue;

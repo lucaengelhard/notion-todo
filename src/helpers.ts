@@ -1,13 +1,32 @@
 import * as vscode from "vscode";
 import { rootFolder } from "./config";
 import path from "path";
-import { workspaceFiles } from "./extension";
+
+export const regExFindTodo = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
+export const regExReplaceComments = /\/\/\s*TODO:|\/\*\s*TODO:/gm;
+export const regExNotionLink = /\((.*?)\)[^()]*$/gm;
+export const regExNotionId = /[^-]*$/gm;
 
 export async function getWorkspaceFiles() {
   return await vscode.workspace.findFiles(
     "**/*.{ts,js}",
     "**/{node_modules,dist}/**"
   );
+}
+
+export function getToDoIdsInFile(text: string) {
+  let ids: Set<string> = new Set();
+  let match;
+  while ((match = regExFindTodo.exec(text))) {
+    const notionUrlMatches = /\((.*?)\)[^()]*$/gm.exec(match[0]);
+
+    if (notionUrlMatches) {
+      const id = getNotionIdFromUrl(notionUrlMatches[0]);
+      ids.add(id);
+    }
+  }
+
+  return ids;
 }
 
 export function sanitizeToDoString(string: string): string {
@@ -49,8 +68,3 @@ export function getNotionIdFromUrl(url: string): string {
     return sanitizeIdString(notionIdMatches[0]);
   }
 }
-
-export const regExFindTodo = /\/\/\s*TODO:.*|\/\*\s*TODO:[\s\S]*?\*\//gm;
-export const regExReplaceComments = /\/\/\s*TODO:|\/\*\s*TODO:/gm;
-export const regExNotionLink = /\((.*?)\)[^()]*$/gm;
-export const regExNotionId = /[^-]*$/gm;
